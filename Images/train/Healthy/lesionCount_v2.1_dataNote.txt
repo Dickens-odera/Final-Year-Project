@@ -1,0 +1,328 @@
+// ******************************************************************
+//
+// ImageJ macro for collecting line annotations of images
+//
+// Ethan Stewart
+// Cornell University 2018
+//
+// Takes a directory of images, opens each image and waits for user 
+// to draw line annotations across features of interest. Hit [space]
+// to move on to next image and [shift] to skip an image. Moves images
+// to "/Annotated" folder within image directory after they are annotated.
+// Saves coordinates of the start and end points of each line along with 
+// image info as .csv file to "/Count" folder within image directory.
+//
+// ******************************************************************
+
+// ########## Window setup ########## //
+ 
+// Move ImageJ window to top left of screen
+script = 
+    "IJ.getInstance().setLocation(10, 0);" 
+eval("script", script); 
+
+// Moves log window beneath ImageJ window.
+script = 
+    "lw = WindowManager.getFrame('Log');\n"+ 
+    "if (lw!=null) {\n"+ 
+    "lw.setLocation(10,10);\n"+ 
+    "lw.setSize(570,10);\n"+ 
+    "}\n"; 
+eval("script", script);
+
+// Clear log
+print("\\Clear");
+print("Running Lesion Annotation Macro..."); 
+
+
+// ########## User Dialogs ########## //
+
+// Choose user Dialog
+Dialog.create("User");
+Dialog.addChoice("Who are you?", newArray("Other", "your name here", "...")); // Insert user names if required.
+Dialog.setLocation(600,0); 
+Dialog.show();
+
+user=Dialog.getChoice(); 
+
+if(user == "Other"){
+	Dialog.create("Enter Name");
+	Dialog.addString("Enter your name","");
+	Dialog.setLocation(600,0); 
+	Dialog.show();
+
+	user=Dialog.getString();
+}
+
+// Choose image directory
+dir = getDirectory("Choose a Directory ");
+
+// Get all files in dir
+list=getFileList(dir); 
+
+// Get all files in sub directories:
+subdir=newArray();
+
+list = getFileList(dir);
+y=newArray();
+for (i=0; i<list.length; i++) {
+    if (endsWith(list[i], "/")){
+		y= getFileList(""+dir+list[i]);
+		
+		for(j=0;j<y.length;j++){
+			subdir=Array.concat(subdir,dir+list[i]+y[j]);
+		}
+	}
+}
+
+
+
+// ########## Make output folders ######### //
+
+
+// Check for output folders
+done=false;
+count=false;
+
+for(i=0;i<list.length;i++){
+
+	if(list[i] == "Annotated/"){
+		done=true;
+	}
+	
+	if(list[i] == "Count/"){
+		count=true;
+	}
+
+}
+
+//Make output folders if not present
+if (done == false){
+	File.makeDirectory(dir+"Annotated"+File.separator);
+	print("Annotated folder created");
+}else{
+	print("Annotated folder exists");
+}
+
+if (count == false){
+	File.makeDirectory(dir+"Count"+File.separator);
+	print("Count folder created");
+}else{
+	print("Count folder exists");
+}
+
+
+// ########## Randomise file list ########### //
+
+//--------------------------- 
+// Randomise file function:
+function shuffle(array) { 
+	n = array.length;       // The number of items left to shuffle (loop invariant). 
+  	while (n > 1) { 
+		k = randomInt(n);     // 0 <= k < n. 
+		n--;                  // n is now the last pertinent index; 
+		temp = array[n];      // swap array[n] with array[k] (does nothing if k == n). 
+		array[n] = array[k]; 
+		array[k] = temp; 
+  	} 
+} 
+
+// returns a random number, 0 <= k < n 
+function randomInt(n) { 
+  	return n * random(); 
+} 
+//--------------------------- 
+
+// Randomise file list:
+shuffle(subdir);
+
+
+// ########## Loop through images ########### //
+
+for (a=0;a<subdir.length;a++){
+
+	path = subdir[a];
+	
+	// Closes any open images:	
+	while (nImages>0) { 
+        selectImage(nImages); 
+        close(); 
+    } 
+
+	setBatchMode(false);
+	
+	// Check if file is an image and exists, ie, hasn't been moved to the Annotation folder by another user. Useful if images are held on a central server and multiple users are performing annotations on local machines:
+	if (File.exists(path) && endsWith(subdir[a], ".jpg") || endsWith(subdir[a], ".JPG")) {
+		
+		// Open image
+		open(path);
+		
+		// Image location and size. Change values to suit screen size.
+		setLocation(270, 0, 1000, 800); 
+
+		// Set tools
+		setForegroundColor(0, 255, 0);
+		setLineWidth(4);
+		setTool("line");
+		
+		// Get image name
+		name = File.getName(path);
+		nameshort = File.nameWithoutExtension;
+
+		
+		// Clear existing windows:
+		if (isOpen("ROI Manager")) {
+			selectWindow("ROI Manager");
+			run("Close");
+		  }
+
+		if (isOpen("Results")) {
+			selectWindow("Results");
+			run("Close");
+		}
+
+		roiManager("show all with labels")
+		selectWindow("ROI Manager");
+		setLocation(10,100);
+		
+		
+		// ########## Wait for user to draw some lines ########## //
+		
+		// [space] = move to next image
+		// [shift] = skip image
+		
+		skipimage=0;
+		state=0;
+		newState=0;
+
+		while(state==0 && isKeyDown("space") == 0){
+
+			if(isKeyDown("shift")==1){
+			
+				skipimage=1;
+				state=1;
+			}else{
+
+				getCursorLoc(xpos,ypos,zpos,flags);
+
+				if(flags != 0){
+					newState=1;
+				}
+
+				if(flags==0 && newState==1){
+					//print("button released");
+					roiManager("Add");
+					roiManager("show all with labels");
+					newState=0;
+				
+				}
+			}
+
+		}
+		
+		// Catch images skiped by mistake:
+		skipChoice="None";
+		
+		if(skipimage==1 && roiManager("count")>0){
+		
+			Dialog.create("Hang on!");
+			Dialog.addMessage("This image contains an annotation, are you sure you want to skip it?");
+			Dialog.addChoice("Skip image", newArray("Yes", "No"), "No");
+			Dialog.show;
+			
+			skipChoice=Dialog.getChoice();
+		}
+		
+		// ########## Record annotations ########## //
+		
+		// Hide image
+		setBatchMode(true);
+
+		getDateAndTime(year, month, dayOfWeek, dayOfMonth, hour, minute, second, msec);
+		month = month+1; // Zero based index, Jan = month 0.
+		
+		
+		// Add contents of ROI manager to results table
+		if(roiManager("count") > 0 && skipChoice !="Yes"){
+
+				// If image contains annotations:
+				for (k=0 ; k<roiManager("count"); k++) {
+				//selectImage(id);
+				roiManager("select", k);
+				
+				Roi.setStrokeWidth(5);
+				
+				getLine(x1, y1, x2, y2, lineWidth);
+				x1=round(x1);
+				y1=round(y1);
+				x2=round(x2);
+				y2=round(y2);
+
+				nRes=nResults();
+
+				//print("nResults=",nRes);
+				setResult("image",nRes,nameshort);
+				setResult("x1",nRes,x1);
+				setResult("y1",nRes,y1);
+				setResult("x2",nRes,x2);
+				setResult("y2",nRes,y2);
+				setResult("user",nRes,user);
+				setResult("day",nRes,dayOfMonth);
+				setResult("month",nRes,month);
+				setResult("year",nRes,year);
+				setResult("hour",nRes,hour);
+				setResult("minute",nRes,minute);
+				setResult("skipImage",nRes,0);
+				updateResults();
+
+			}
+		
+		}else{
+
+			// If image contains no annotations:
+			nRes=nResults();
+			setResult("image",nRes,nameshort);
+			setResult("x1",nRes,0);
+			setResult("y1",nRes,0);
+			setResult("x2",nRes,0);
+			setResult("y2",nRes,0);
+			setResult("user",nRes,user);
+			setResult("day",nRes,dayOfMonth);
+			setResult("month",nRes,month);
+			setResult("year",nRes,year);
+			setResult("hour",nRes,hour);
+			setResult("minute",nRes,minute);
+			
+			// Set skipImage flag to 1 if image should be skipped:
+			if(skipimage==1){
+				setResult("skipImage",nRes,1);
+			}else{
+				setResult("skipImage",nRes,0);
+			}
+			
+			updateResults();
+		}
+
+		// Save annotations:
+		selectWindow("Results"); 
+		saveAs("Results", dir+"/Count/"+nameshort+"_results.csv");
+		run("Close");
+
+		
+		// Move file to 'Annotated' folder:
+		File.rename(path, dir+"/Annotated/"+name);
+
+		
+	}else{// If file does not end in .JPG macro skips to here
+		print("Not an image");
+	}
+}
+
+// Closes any open images:	
+while (nImages>0) { 
+    selectImage(nImages); 
+	close(); 
+} 
+    
+print("macro finished");
+
